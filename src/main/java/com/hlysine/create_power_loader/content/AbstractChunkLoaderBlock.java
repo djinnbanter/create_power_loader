@@ -4,8 +4,13 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
 import net.createmod.catnip.data.Iterate;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
@@ -16,6 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -125,6 +131,25 @@ public abstract class AbstractChunkLoaderBlock extends DirectionalKineticBlock {
     @Override
     public boolean hasAnalogOutputSignal(@NotNull BlockState pState) {
         return true;
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override
+    public @NotNull InteractionResult useWithoutItem(@NotNull BlockState state, @NotNull Level level, @NotNull BlockPos pos, @NotNull Player player, @NotNull BlockHitResult hitResult) {
+        if (player.isShiftKeyDown()) {
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be instanceof AbstractChunkLoaderBlockEntity chunkLoader) {
+                chunkLoader.toggleTickLoading();
+                if (!level.isClientSide()) {
+                    Component message = chunkLoader.tickLoadingEnabled
+                            ? Component.literal("Tick Loading: ON").withStyle(ChatFormatting.GREEN)
+                            : Component.literal("Tick Loading: OFF").withStyle(ChatFormatting.RED);
+                    player.displayClientMessage(message, true);
+                }
+                return InteractionResult.SUCCESS;
+            }
+        }
+        return InteractionResult.PASS;
     }
 
     @SuppressWarnings("deprecation")

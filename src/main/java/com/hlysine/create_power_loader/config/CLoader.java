@@ -16,6 +16,8 @@ public class CLoader extends ConfigBase {
 
     public final ConfigBool enableStatic = b(true, "enableStatic", Comments.enableStatic);
 
+    public final ConfigBool enableRandomTicks = b(true, "enableRandomTicks", Comments.enableRandomTicks);
+
     public final ConfigBool enableContraption;
     public final ConfigInt rangeOnContraption = i(2, 1, 10, "rangeOnContraption", Comments.rangeOnContraption);
 
@@ -54,6 +56,7 @@ public class CLoader extends ConfigBase {
         static String speedMultiplier = "A multiplier for the minimum speed requirement of a chunk loader";
         static String stressImpact = "The stress impact of a chunk loader when it is at 1 RPM";
         static String enableStatic = "Whether the chunk loader functions on the ground when given rotational power";
+        static String enableRandomTicks = "Whether the chunk loader allows random ticks in the loaded chunks. Required for crop and tree growth without a player nearby.";
         static String enableContraption = "Whether the chunk loader functions on contraptions other than trains. WARNING: does not update contraptions that are currently unloaded";
         static String rangeOnContraption = "Chunk loading radius on contraptions. 1 = 1 chunk, 2 = 9 chunks. Contraptions require a minimum radius of 2 for reliable loading";
         static String enableTrain = "Whether the chunk loader functions on trains";

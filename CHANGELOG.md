@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Added per-loader "Tick Loading" toggle (sneak + right-click the chunk loader to toggle)
+- When enabled, crops, saplings, and other random-tick blocks will grow in loaded chunks even without a nearby player
+- Added `enableRandomTicks` server config option to globally allow or disallow this feature
+- Shows actionbar feedback (green ON / red OFF) when toggling
+
 ## 2.0.3 - 2025-05-20
 
 ### Added

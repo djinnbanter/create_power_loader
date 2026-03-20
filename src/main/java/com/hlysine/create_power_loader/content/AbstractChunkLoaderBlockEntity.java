@@ -37,6 +37,7 @@ public abstract class AbstractChunkLoaderBlockEntity extends KineticBlockEntity 
     protected BlockPos lastBlockPos;
     protected boolean lastEnabled;
     protected int lastRange;
+    protected boolean lastTickLoading;
     protected int chunkUpdateCooldown;
     protected int chunkUnloadCooldown;
     protected Set<LoadedChunkPos> forcedChunks = new HashSet<>();
@@ -44,6 +45,8 @@ public abstract class AbstractChunkLoaderBlockEntity extends KineticBlockEntity 
     private StationBlockEntity attachedStation = null;
     public boolean isLoaderActive = false;
     private boolean deferredEdgePoint = false;
+
+    public boolean tickLoadingEnabled = false;
 
     public AbstractChunkLoaderBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state, LoaderType type) {
         super(typeIn, pos, state);
@@ -112,6 +115,19 @@ public abstract class AbstractChunkLoaderBlockEntity extends KineticBlockEntity 
         this.forcedChunks.addAll(forcedChunks);
     }
 
+    public void toggleTickLoading() {
+        tickLoadingEnabled = !tickLoadingEnabled;
+        if (!level.isClientSide()) {
+            updateForcedChunks();
+            setChanged();
+            notifyUpdate();
+        }
+    }
+
+    public boolean isTickLoadingEnabled() {
+        return tickLoadingEnabled && CPLConfigs.server().getFor(type).enableRandomTicks.get();
+    }
+
     @Override
     public void tick() {
         super.tick();
@@ -150,13 +166,13 @@ public abstract class AbstractChunkLoaderBlockEntity extends KineticBlockEntity 
 
     private boolean needsUpdate() {
         if (lastBlockPos == null) return true;
-        return !lastBlockPos.equals(getBlockPos()) || lastEnabled != canLoadChunks() || lastRange != getLoadingRange() || chunkUnloadCooldown > 0;
+        return !lastBlockPos.equals(getBlockPos()) || lastEnabled != canLoadChunks() || lastRange != getLoadingRange() || lastTickLoading != isTickLoadingEnabled() || chunkUnloadCooldown > 0;
     }
 
     protected void updateForcedChunks() {
         boolean resetStates = true;
         if (canLoadChunks()) {
-            ChunkLoadManager.updateForcedChunks(level.getServer(), new LoadedChunkPos(getLevel(), getBlockPos()), getBlockPos(), getLoadingRange(), forcedChunks);
+            ChunkLoadManager.updateForcedChunks(level.getServer(), new LoadedChunkPos(getLevel(), getBlockPos()), getBlockPos(), getLoadingRange(), forcedChunks, isTickLoadingEnabled());
         } else if (chunkUnloadCooldown >= CPLConfigs.server().getFor(type).unloadGracePeriod.get()) {
             unforceAllChunks(level.getServer(), getBlockPos(), forcedChunks);
         } else {
@@ -168,6 +184,7 @@ public abstract class AbstractChunkLoaderBlockEntity extends KineticBlockEntity 
             lastBlockPos = getBlockPos().immutable();
             lastEnabled = canLoadChunks();
             lastRange = getLoadingRange();
+            lastTickLoading = isTickLoadingEnabled();
         }
     }
 
@@ -215,11 +232,13 @@ public abstract class AbstractChunkLoaderBlockEntity extends KineticBlockEntity 
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
         isLoaderActive = compound.getBoolean("CoreActive");
+        tickLoadingEnabled = compound.getBoolean("TickLoading");
     }
 
     @Override
     protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         compound.putBoolean("CoreActive", isLoaderActive);
+        compound.putBoolean("TickLoading", tickLoadingEnabled);
         super.write(compound, registries, clientPacket);
     }
 

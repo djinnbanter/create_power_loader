@@ -21,6 +21,9 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 public class ChunkLoadManager {
     private static final TicketController TICKET_CONTROLLER = new TicketController(
@@ -33,6 +36,9 @@ public class ChunkLoadManager {
     private static final List<Pair<UUID, Set<LoadedChunkPos>>> unforceQueue = new LinkedList<>();
     private static final Map<UUID, Set<LoadedChunkPos>> savedForcedChunks = new HashMap<>();
     private static int savedChunksDiscardCountdown = SAVED_CHUNKS_DISCARD_TICKS;
+
+    private static final Map<ResourceLocation, LongSet> activeTickingChunks = new ConcurrentHashMap<>();
+
     /**
      * Only accessible during GlobalRailwayManager#tick
      */
@@ -69,32 +75,47 @@ public class ChunkLoadManager {
         }
     }
 
+    // Backward-compatible overloads (used by train/contraption loaders that don't have tick loading)
     public static <T extends Comparable<? super T>> void updateForcedChunks(MinecraftServer server, LoadedChunkPos center, T owner, int loadingRange, Set<LoadedChunkPos> forcedChunks) {
+        updateForcedChunks(server, center, owner, loadingRange, forcedChunks, false);
+    }
+
+    public static <T extends Comparable<? super T>> void updateForcedChunks(MinecraftServer server, LoadedChunkPos center, T owner, int loadingRange, Set<LoadedChunkPos> forcedChunks, boolean tickLoading) {
         Set<LoadedChunkPos> targetChunks = getChunksAroundCenter(center, loadingRange);
-        updateForcedChunks(server, targetChunks, owner, forcedChunks);
+        updateForcedChunks(server, targetChunks, owner, forcedChunks, tickLoading);
     }
 
     public static <T extends Comparable<? super T>> void updateForcedChunks(MinecraftServer server, Collection<LoadedChunkPos> centers, T owner, int loadingRange, Set<LoadedChunkPos> forcedChunks) {
+        updateForcedChunks(server, centers, owner, loadingRange, forcedChunks, false);
+    }
+
+    public static <T extends Comparable<? super T>> void updateForcedChunks(MinecraftServer server, Collection<LoadedChunkPos> centers, T owner, int loadingRange, Set<LoadedChunkPos> forcedChunks, boolean tickLoading) {
         Set<LoadedChunkPos> targetChunks = new HashSet<>();
         for (LoadedChunkPos center : centers) {
             targetChunks.addAll(getChunksAroundCenter(center, loadingRange));
         }
-        updateForcedChunks(server, targetChunks, owner, forcedChunks);
+        updateForcedChunks(server, targetChunks, owner, forcedChunks, tickLoading);
     }
 
     public static <T extends Comparable<? super T>> void updateForcedChunks(MinecraftServer server, Collection<LoadedChunkPos> newChunks, T owner, Set<LoadedChunkPos> forcedChunks) {
+        updateForcedChunks(server, newChunks, owner, forcedChunks, false);
+    }
+
+    public static <T extends Comparable<? super T>> void updateForcedChunks(MinecraftServer server, Collection<LoadedChunkPos> newChunks, T owner, Set<LoadedChunkPos> forcedChunks, boolean tickLoading) {
         Set<LoadedChunkPos> unforcedChunks = new HashSet<>();
         for (LoadedChunkPos chunk : forcedChunks) {
             if (newChunks.contains(chunk)) {
                 newChunks.remove(chunk);
+                // Re-apply tick state for existing chunks to handle toggle changes
+                updateTickingState(chunk.dimension(), chunk.x(), chunk.z(), tickLoading);
             } else {
-                forceChunk(server, owner, chunk.dimension(), chunk.x(), chunk.z(), false);
+                forceChunk(server, owner, chunk.dimension(), chunk.x(), chunk.z(), false, false);
                 unforcedChunks.add(chunk);
             }
         }
         forcedChunks.removeAll(unforcedChunks);
         for (LoadedChunkPos chunk : newChunks) {
-            forceChunk(server, owner, chunk.dimension(), chunk.x(), chunk.z(), true);
+            forceChunk(server, owner, chunk.dimension(), chunk.x(), chunk.z(), true, tickLoading);
             forcedChunks.add(chunk);
         }
         if (unforcedChunks.size() > 0 || newChunks.size() > 0)
@@ -107,7 +128,7 @@ public class ChunkLoadManager {
 
     public static <T extends Comparable<? super T>> void unforceAllChunks(MinecraftServer server, T owner, Set<LoadedChunkPos> forcedChunks) {
         for (LoadedChunkPos chunk : forcedChunks) {
-            forceChunk(server, owner, chunk.dimension(), chunk.x(), chunk.z(), false);
+            forceChunk(server, owner, chunk.dimension(), chunk.x(), chunk.z(), false, false);
         }
         if (forcedChunks.size() > 0)
             LOGGER.debug("CPL: unload all, unloaded {} chunks.", forcedChunks.size());
@@ -124,7 +145,7 @@ public class ChunkLoadManager {
         return ret;
     }
 
-    private static <T extends Comparable<? super T>> void forceChunk(MinecraftServer server, T owner, ResourceLocation dimension, int chunkX, int chunkZ, boolean add) {
+    private static <T extends Comparable<? super T>> void forceChunk(MinecraftServer server, T owner, ResourceLocation dimension, int chunkX, int chunkZ, boolean add, boolean tickLoading) {
         ServerLevel targetLevel = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
         assert targetLevel != null;
         if (owner instanceof BlockPos) {
@@ -132,6 +153,23 @@ public class ChunkLoadManager {
         } else {
             TICKET_CONTROLLER.forceChunk(targetLevel, (UUID) owner, chunkX, chunkZ, add, true);
         }
+
+        updateTickingState(dimension, chunkX, chunkZ, add && tickLoading);
+    }
+
+    private static void updateTickingState(ResourceLocation dimension, int chunkX, int chunkZ, boolean shouldTick) {
+        ChunkPos cp = new ChunkPos(chunkX, chunkZ);
+        LongSet ticks = activeTickingChunks.computeIfAbsent(dimension, k -> new LongOpenHashSet());
+        if (shouldTick) {
+            ticks.add(cp.toLong());
+        } else {
+            ticks.remove(cp.toLong());
+        }
+    }
+
+    public static boolean isTickingForSpawning(Level level, ChunkPos pos) {
+        LongSet ticks = activeTickingChunks.get(level.dimension().location());
+        return ticks != null && ticks.contains(pos.toLong());
     }
 
     public static Set<LoadedChunkPos> getSavedForcedChunks(UUID entityUUID) {
@@ -164,6 +202,10 @@ public class ChunkLoadManager {
             for (Long chunk : tickets.ticking()) {
                 ChunkPos chunkPos = new ChunkPos(chunk);
                 forcedChunks.add(new LoadedChunkPos(level.dimension().location(), chunkPos));
+                // Restore ticking state from the block entity's saved setting
+                if (blockEntity.tickLoadingEnabled) {
+                    activeTickingChunks.computeIfAbsent(level.dimension().location(), k -> new LongOpenHashSet()).add(chunkPos.toLong());
+                }
             }
             blockEntity.reclaimChunks(forcedChunks);
             LOGGER.debug("CPL: level {} position {} reclaimed {} chunks.", level.dimension().location(), blockPos.toShortString(), forcedChunks.size());
